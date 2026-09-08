@@ -1,0 +1,606 @@
+<!-- ===========================================================
+     Rent & Budget Tracker — personal use (AED, Dubai)
+     For JC and his partner. Rent starts at 1,200 AED split in half —
+     tap "Edit" on the rent card to change the amount or give each of you
+     a custom share. Expense tracking so you can both see spending and
+     save; every amount also shown in PHP at an editable rate.
+
+     The rent you set applies to every month, not just the one on screen.
+
+     Data is saved in THIS browser (localStorage). It survives refresh,
+     but does NOT sync between phones — each device keeps its own copy.
+     Want both of you to edit the same budget from different phones? That
+     needs a small backend (Supabase); ask and we'll add it.
+
+     The AED→PHP rate is manual (tap it to update). A static file can't
+     fetch a live rate on its own, and a manual rate never breaks.
+     Deploy: rename to index.html, drop at netlify.com/drop or its own repo.
+     =========================================================== -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0B0D12" />
+<title>Our Budget</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0B0D12; --card: #141821; --card-2: #1B212C;
+    --line: rgba(255,255,255,0.08); --line-2: rgba(255,255,255,0.05);
+    --text: #EDF0F5; --muted: #8A93A6; --dim: #5D6577;
+    --mint: #35D0A5; --mint-deep: #1FAE86; --rose: #FB7185; --amber: #FBBF24;
+    --p1: #6E8BFF; --p2: #F4A0C0;
+    --display: 'Sora', system-ui, sans-serif; --body: 'Inter', system-ui, sans-serif;
+    --wrap: 720px;
+    color-scheme: dark;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { background: var(--bg); color: var(--text); font-family: var(--body); line-height: 1.5; -webkit-font-smoothing: antialiased; padding: 0 0 120px; }
+  h1, h2, h3 { font-family: var(--display); font-weight: 700; letter-spacing: -0.02em; }
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+  .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 18px; }
+  button { font-family: inherit; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
+  .php { color: var(--dim); font-size: .72em; font-weight: 400; }
+
+  header { position: sticky; top: 0; z-index: 20; background: rgba(11,13,18,.86); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line-2); padding-top: env(safe-area-inset-top); }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 60px; }
+  .bar .who { font-family: var(--display); font-size: 17px; font-weight: 700; }
+  .bar .who i { font-style: normal; color: var(--mint); }
+  .month { display: flex; align-items: center; gap: 6px; }
+  .month button { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--text); font-size: 15px; display: grid; place-items: center; transition: border-color .15s; }
+  .month button:hover { border-color: var(--muted); }
+  .month .lbl { font-family: var(--display); font-weight: 600; font-size: 14.5px; min-width: 118px; text-align: center; }
+
+  .fxbar { display: flex; align-items: center; justify-content: center; gap: 7px; font-size: 12px; color: var(--muted); padding: 8px 0; border-bottom: 1px solid var(--line-2); background: var(--card); }
+  .fxbar b { color: var(--text); font-weight: 600; }
+  .fxbar button { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 7px; padding: 3px 9px; font-size: 11.5px; transition: .15s; }
+  .fxbar button:hover { color: var(--text); border-color: var(--muted); }
+
+  .top { padding: 24px 0 8px; }
+  .hero-fig { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero-fig .lead { font-size: 13px; color: var(--muted); }
+  .spent { font-family: var(--display); font-size: clamp(2.4rem, 10vw, 3.4rem); font-weight: 700; line-height: 1; letter-spacing: -0.04em; }
+  .spent .php { font-size: .34em; display: block; margin-top: 6px; letter-spacing: 0; }
+  .of { color: var(--dim); font-size: 15px; }
+  .of #budget { border-bottom: 1px dashed var(--line); cursor: pointer; }
+  .of #budget:hover { color: var(--text); border-bottom-color: var(--muted); }
+  .barline { height: 8px; background: var(--card-2); border-radius: 100px; overflow: hidden; margin: 18px 0 8px; }
+  .barline i { display: block; height: 100%; background: var(--mint); border-radius: 100px; transition: width .4s cubic-bezier(.2,.9,.25,1); }
+  .barline i.over { background: var(--rose); }
+  .undertext { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+  .undertext b { font-weight: 600; }
+  .left-good { color: var(--mint); } .left-bad { color: var(--rose); }
+  .mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
+  .chip { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .chip .k { font-size: 12px; color: var(--muted); }
+  .chip .v { font-family: var(--display); font-weight: 600; font-size: 1.2rem; letter-spacing: -0.03em; margin-top: 4px; }
+
+  .sec { margin-top: 30px; }
+  .sec-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .sec-h h2 { font-size: 1.05rem; }
+  .sec-h .sum { font-family: var(--display); font-weight: 600; font-size: 1.05rem; }
+  .add-line { background: none; border: 1px dashed var(--line); color: var(--muted); width: 100%; border-radius: 12px; padding: 12px; font-size: 14px; transition: border-color .15s, color .15s; }
+  .add-line:hover { border-color: var(--mint); color: var(--text); }
+
+  /* RENT SPLIT CARD */
+  .rent { background: linear-gradient(160deg, var(--card), var(--card-2)); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .rent .rtop { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .rent .rtop h3 { font-size: 1.05rem; flex: 1; min-width: 0; }
+  .rent .rtop .big { font-family: var(--display); font-weight: 700; font-size: 1.4rem; letter-spacing: -0.03em; cursor: pointer; }
+  .rent .rtop .big:hover { color: var(--mint); }
+  .rent .rtop .edit { border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 9px; padding: 6px 11px; font-size: 12px; font-weight: 600; white-space: nowrap; transition: .15s; }
+  .rent .rtop .edit:hover { border-color: var(--mint); color: var(--mint); }
+  .rent .rsub { font-size: 12.5px; color: var(--muted); margin-bottom: 16px; }
+  .halfrow { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line-2); }
+  .halfrow .nm { flex: 1; display: flex; align-items: center; gap: 9px; font-size: 14.5px; }
+  .halfrow .nm i { width: 9px; height: 9px; border-radius: 50%; font-style: normal; flex: none; }
+  .halfrow .share { font-family: var(--display); font-weight: 600; font-size: 1rem; text-align: right; }
+  .halfrow .share .php { display: block; font-size: 11px; font-weight: 400; }
+  .halfrow .pay { border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 9px; padding: 8px 14px; font-size: 12.5px; font-weight: 600; white-space: nowrap; transition: .15s; display: flex; align-items: center; gap: 6px; }
+  .halfrow .pay:hover { border-color: var(--muted); color: var(--text); }
+  .halfrow .pay.paid { background: rgba(53,208,165,.14); border-color: var(--mint); color: var(--mint); }
+  .rent .rstatus { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13.5px; }
+  .rent .rstatus.done { color: var(--mint); font-weight: 600; }
+  .rent .rstatus.wait { color: var(--amber); }
+
+  .row { display: grid; grid-template-columns: 34px 1fr auto auto; gap: 12px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px; }
+  .row .ic { width: 34px; height: 34px; border-radius: 10px; background: var(--card-2); display: grid; place-items: center; font-size: 15px; }
+  .row .body { min-width: 0; }
+  .row .name { font-weight: 500; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .row .amt { font-family: var(--display); font-weight: 600; font-size: 1rem; white-space: nowrap; text-align: right; }
+  .row .amt .php { display: block; font-size: 11px; }
+  .row .del { width: 30px; height: 30px; border-radius: 8px; border: none; background: transparent; color: var(--dim); font-size: 16px; display: grid; place-items: center; transition: color .15s, background .15s; }
+  .row .del:hover { color: var(--rose); background: rgba(251,113,133,.1); }
+  .row.editable { cursor: pointer; }
+  .row.editable:hover { border-color: var(--muted); }
+  .tag-who { font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+  .who-1 { background: rgba(110,139,255,.16); color: var(--p1); }
+  .who-2 { background: rgba(244,160,192,.16); color: var(--p2); }
+  .who-share { background: var(--card-2); color: var(--muted); }
+  .empty { text-align: center; color: var(--dim); font-size: 13.5px; padding: 22px; border: 1px dashed var(--line-2); border-radius: 14px; }
+
+  .split { background: linear-gradient(160deg, var(--card), var(--card-2)); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .split .who-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; border-bottom: 1px solid var(--line-2); }
+  .split .who-row:last-of-type { border-bottom: none; }
+  .split .who-row .nm { color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .split .who-row .nm i { width: 8px; height: 8px; border-radius: 50%; font-style: normal; }
+  .split .who-row .v { font-family: var(--display); font-weight: 600; }
+  .split .settle { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
+  .split .settle b { color: var(--mint); font-weight: 600; }
+
+  .cats { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .catrow .catlbl { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px; }
+  .catrow .catlbl span:last-child { color: var(--muted); }
+  .catrow .catbar { height: 6px; background: var(--card-2); border-radius: 100px; overflow: hidden; }
+  .catrow .catbar i { display: block; height: 100%; border-radius: 100px; }
+
+  .dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; padding: 14px 18px calc(14px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 30%); }
+  .dock .in { max-width: var(--wrap); margin: 0 auto; }
+  .dock button { width: 100%; background: var(--mint); color: #06231B; border: none; border-radius: 14px; padding: 16px; font-family: var(--display); font-weight: 600; font-size: 15px; transition: background .15s; }
+  .dock button:hover { background: var(--mint-deep); }
+
+  .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.6); opacity: 0; pointer-events: none; transition: opacity .25s; }
+  .scrim.up { opacity: 1; pointer-events: auto; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; background: var(--card); border-radius: 22px 22px 0 0; border-top: 1px solid var(--line); padding: 8px 18px calc(24px + env(safe-area-inset-bottom)); transform: translateY(100%); transition: transform .32s cubic-bezier(.2,.9,.25,1); max-height: 92vh; overflow-y: auto; }
+  .sheet.up { transform: none; }
+  .sheet .grip { width: 40px; height: 4px; border-radius: 100px; background: var(--line); margin: 8px auto 18px; }
+  .sheet .in { max-width: var(--wrap); margin: 0 auto; }
+  .sheet h3 { font-size: 1.2rem; margin-bottom: 18px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 7px; }
+  .field input { width: 100%; background: var(--card-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px; font-family: var(--body); font-size: 17px; color: var(--text); transition: border-color .15s; }
+  .field input:focus { outline: none; border-color: var(--mint); }
+  .field .money { position: relative; }
+  .field .money span { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 15px; }
+  .field .money input { padding-left: 48px; }
+  .hint { font-size: 12px; color: var(--dim); margin-top: 6px; }
+  .chips-pick { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chips-pick button { flex: 1; min-width: 80px; background: var(--card-2); border: 1px solid var(--line); color: var(--muted); border-radius: 11px; padding: 12px 8px; font-size: 13.5px; font-weight: 500; transition: .15s; }
+  .chips-pick button[aria-pressed="true"] { border-color: var(--mint); color: var(--text); background: rgba(53,208,165,.1); }
+  .who-pick button[data-w="1"][aria-pressed="true"] { border-color: var(--p1); color: var(--p1); background: rgba(110,139,255,.12); }
+  .who-pick button[data-w="2"][aria-pressed="true"] { border-color: var(--p2); color: var(--p2); background: rgba(244,160,192,.12); }
+  .sheet-acts { display: flex; gap: 10px; margin-top: 22px; }
+  .sheet-acts .save { flex: 1; background: var(--mint); color: #06231B; border: none; border-radius: 13px; padding: 15px; font-family: var(--display); font-weight: 600; font-size: 15px; }
+  .sheet-acts .save:disabled { background: var(--card-2); color: var(--dim); }
+  .sheet-acts .cancel { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 13px; padding: 15px 20px; font-size: 14.5px; }
+
+  .footnote { text-align: center; font-size: 12px; color: var(--dim); margin-top: 34px; line-height: 1.7; }
+  .footnote button { background: none; border: none; color: var(--rose); font-size: 12px; text-decoration: underline; }
+
+  @media (min-width: 600px) {
+    .dock { padding-bottom: 20px; }
+    .sheet { left: 50%; right: auto; transform: translate(-50%, 100%); width: 480px; border-radius: 22px; bottom: 20px; border: 1px solid var(--line); }
+    .sheet.up { transform: translateX(-50%); }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <span class="who">Our <i>Budget</i></span>
+    <div class="month">
+      <button id="prevM" aria-label="Previous month">&#8249;</button>
+      <span class="lbl" id="mLabel"></span>
+      <button id="nextM" aria-label="Next month">&#8250;</button>
+    </div>
+  </div>
+  <div class="fxbar">1 AED = <b id="fxVal"></b> PHP <button id="fxEdit">update</button></div>
+</header>
+
+<main class="wrap">
+  <section class="top">
+    <div class="hero-fig"><span class="lead">Spent this month</span></div>
+    <div class="hero-fig">
+      <span class="spent num" id="spent">0 AED<span class="php" id="spentPhp"></span></span>
+      <span class="of">of <span id="budget">0 AED</span></span>
+    </div>
+    <div class="barline"><i id="bar"></i></div>
+    <div class="undertext"><span id="pace"></span><span id="left"></span></div>
+    <div class="mini">
+      <div class="chip"><div class="k">Rent (your share)</div><div class="v num" id="mRent">0</div></div>
+      <div class="chip"><div class="k">Other bills</div><div class="v num" id="mBills">0</div></div>
+      <div class="chip"><div class="k">Day-to-day</div><div class="v num" id="mDay">0</div></div>
+    </div>
+  </section>
+
+  <!-- RENT SPLIT -->
+  <section class="sec">
+    <div class="sec-h"><h2>Rent for the flat</h2></div>
+    <div class="rent" id="rentCard"></div>
+  </section>
+
+  <!-- OTHER FIXED -->
+  <section class="sec">
+    <div class="sec-h"><h2>Other fixed bills</h2><span class="sum num" id="fixedSum">0</span></div>
+    <div id="fixedList"></div>
+    <button class="add-line" id="addFixed">+ Add a fixed bill</button>
+  </section>
+
+  <!-- EXPENSES -->
+  <section class="sec">
+    <div class="sec-h"><h2>Expenses</h2><span class="sum num" id="expSum">0</span></div>
+    <div id="expList"></div>
+  </section>
+
+  <!-- SPLIT -->
+  <section class="sec">
+    <div class="sec-h"><h2>Who paid what</h2></div>
+    <div class="split" id="splitCard"></div>
+  </section>
+
+  <!-- SAVINGS -->
+  <section class="sec">
+    <div class="sec-h"><h2>Saved this month</h2><span class="sum num" id="saveSum">0</span></div>
+    <div class="rent" id="saveCard"></div>
+  </section>
+
+  <!-- BREAKDOWN -->
+  <section class="sec">
+    <div class="sec-h"><h2>Where it went</h2></div>
+    <div class="cats" id="cats"></div>
+  </section>
+
+  <p class="footnote">
+    Saved on this device only — it won't sync to another phone.<br>
+    <button id="wipe">Clear this month's expenses</button>
+  </p>
+</main>
+
+<div class="dock"><div class="in"><button id="addExp">+ Add expense</button></div></div>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Add or edit">
+  <div class="grip"></div>
+  <div class="in" id="sheetIn"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var KEY = 'ourbudget_aed_v1';
+
+  var WHO = { '1': { n: 'JC', c: 'var(--p1)' }, '2': { n: 'Kiara', c: 'var(--p2)' }, 'share': { n: 'Shared', c: 'var(--muted)' } };
+  var CATS = [
+    { id: 'rent', n: 'Rent & bills', icon: '🏠', col: '#6E8BFF' },
+    { id: 'food', n: 'Food', icon: '🍜', col: '#35D0A5' },
+    { id: 'transport', n: 'Transport', icon: '🚇', col: '#FBBF24' },
+    { id: 'grocery', n: 'Groceries', icon: '🛒', col: '#F4A0C0' },
+    { id: 'fun', n: 'Fun', icon: '🎬', col: '#C084FC' },
+    { id: 'health', n: 'Health', icon: '💊', col: '#FB7185' },
+    { id: 'other', n: 'Other', icon: '✨', col: '#8A93A6' }
+  ];
+  function cat(id) { return CATS.filter(function (c) { return c.id === id; })[0] || CATS[CATS.length - 1]; }
+
+  function uid() { return Math.random().toString(36).slice(2, 9); }
+  var data = load();
+  function load() {
+    try { var raw = localStorage.getItem(KEY); if (raw) return migrate(JSON.parse(raw)); }
+    catch (e) {}
+    return seed();
+  }
+  function migrate(d) {
+    if (d.fx == null) d.fx = 17.04;
+    if (!d.months) d.months = {};
+    if (!d.rentSplit || (d.rentSplit.mode !== 'half' && d.rentSplit.mode !== 'custom')) {
+      d.rentSplit = { mode: 'half', share1: (+d.rent || 0) / 2 };
+    }
+    return d;
+  }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
+  function seed() {
+    return {
+      fx: 17.04,
+      budget: 5000,
+      rent: 1200,
+      rentSplit: { mode: 'half', share1: 600 },
+      fixed: [
+        { id: uid(), name: 'DEWA (electricity & water)', amount: 350, cat: 'rent', who: 'share' },
+        { id: uid(), name: 'Internet (du)', amount: 309, cat: 'rent', who: 'share' },
+        { id: uid(), name: 'Mobile plans', amount: 200, cat: 'rent', who: 'share' }
+      ],
+      months: {}   // 'YYYY-MM' -> { exp:[...], rentPaid:{1:false,2:false}, saved:{1:0,2:0} }
+    };
+  }
+
+  var view = new Date(); view.setDate(1);
+  function key(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2); }
+  function monthName(d) { return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }); }
+  function daysIn(d) { return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); }
+  // an expense only stores its day — the month and year come from the month
+  // bucket it lives in, so a real date is that day inside the month on screen
+  function expDate(day) { return new Date(view.getFullYear(), view.getMonth(), Math.max(1, Math.min(daysIn(view), +day || 1))); }
+  function dayLabel(day) { return expDate(day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
+  function isoDate(day) { var d = expDate(day); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function M() {
+    var k = key(view);
+    if (!data.months[k]) data.months[k] = { exp: [], rentPaid: { '1': false, '2': false }, saved: { '1': 0, '2': 0 } };
+    var m = data.months[k];
+    if (!m.exp) m.exp = [];
+    if (!m.rentPaid) m.rentPaid = { '1': false, '2': false };
+    if (!m.saved) m.saved = { '1': 0, '2': 0 };
+    return m;
+  }
+
+  var aed = function (n) { return Math.round(n).toLocaleString('en-US') + ' AED'; };
+  var toPhp = function (n) { return '≈ ₱' + Math.round(n * (+data.fx || 0)).toLocaleString('en-PH'); };
+
+  // each person's slice of the rent — equal halves, or a custom amount for JC
+  // with the remainder going to Kiara (so the two always add up to the rent)
+  function rentShares() {
+    var r = +data.rent || 0;
+    if ((data.rentSplit || {}).mode === 'custom') {
+      var s1 = Math.max(0, Math.min(r, +data.rentSplit.share1 || 0));
+      return { '1': s1, '2': r - s1 };
+    }
+    return { '1': r / 2, '2': r / 2 };
+  }
+  function fixedTotal() { return data.fixed.reduce(function (s, x) { return s + (+x.amount || 0); }, 0); }
+  function expTotal() { return M().exp.reduce(function (s, x) { return s + (+x.amount || 0); }, 0); }
+  // "spent" from JC's side = his rent half + his share of other fixed + his expenses share
+  function total() { return (+data.rent || 0) + fixedTotal() + expTotal(); }
+
+  function paidBy(w) {
+    var sum = 0;
+    // rent: each pays their half when marked paid... but for split math we count committed shares
+    // other fixed + expenses:
+    data.fixed.concat(M().exp).forEach(function (x) {
+      var a = +x.amount || 0;
+      if (x.who === w) sum += a; else if (x.who === 'share') sum += a / 2;
+    });
+    return sum;
+  }
+
+  function render() {
+    $('mLabel').textContent = monthName(view);
+    $('fxVal').textContent = (+data.fx).toFixed(2);
+
+    var t = total(), b = +data.budget || 0;
+    $('spent').innerHTML = aed(t) + '<span class="php">' + toPhp(t) + '</span>';
+    $('budget').textContent = aed(b);
+    var barEl = $('bar');
+    barEl.style.width = Math.min(100, b > 0 ? (t / b) * 100 : 0) + '%';
+    barEl.classList.toggle('over', t > b && b > 0);
+    var left = b - t;
+    $('left').innerHTML = b > 0 ? (left >= 0 ? '<b class="left-good">' + aed(left) + ' left</b>' : '<b class="left-bad">' + aed(-left) + ' over</b>') : '';
+    var now = new Date();
+    if (key(now) === key(view) && b > 0) {
+      var onPace = b * (now.getDate() / daysIn(view));
+      $('pace').textContent = t > onPace * 1.05 ? 'Ahead of pace' : (t < onPace * 0.95 ? 'Under pace' : 'On pace');
+    } else { $('pace').textContent = ''; }
+
+    var shares = rentShares();
+    $('mRent').innerHTML = aed(shares['1']) + '<span class="php">' + toPhp(shares['1']) + '</span>';
+    $('mBills').innerHTML = aed(fixedTotal()) + '<span class="php">' + toPhp(fixedTotal()) + '</span>';
+    $('mDay').innerHTML = aed(expTotal()) + '<span class="php">' + toPhp(expTotal()) + '</span>';
+
+    /* rent split card */
+    var m = M(), custom = (data.rentSplit || {}).mode === 'custom';
+    var bothPaid = m.rentPaid['1'] && m.rentPaid['2'];
+    $('rentCard').innerHTML =
+      '<div class="rtop"><h3>Monthly rent</h3><span class="big" id="rentBig">' + aed(data.rent) + '</span>' +
+        '<button class="edit" data-editrent="1">Edit</button></div>' +
+      '<p class="rsub">' + (custom ? 'Custom split' : 'Split in half · ' + aed(shares['1']) + ' each') + '</p>' +
+      ['1', '2'].map(function (w) {
+        return '<div class="halfrow"><span class="nm"><i style="background:' + WHO[w].c + '"></i>' + WHO[w].n + '\u2019s share</span>' +
+          '<span class="share num">' + aed(shares[w]) + '<span class="php">' + toPhp(shares[w]) + '</span></span>' +
+          '<button class="pay ' + (m.rentPaid[w] ? 'paid' : '') + '" data-rent="' + w + '">' +
+          (m.rentPaid[w] ? '\u2713 Paid' : 'Mark paid') + '</button></div>';
+      }).join('') +
+      '<div class="rstatus ' + (bothPaid ? 'done' : 'wait') + '">' +
+        (bothPaid ? '\u2713 Rent is fully paid for ' + monthName(view) :
+          (m.rentPaid['1'] || m.rentPaid['2'] ? 'Partly paid — waiting on ' + (m.rentPaid['1'] ? WHO['2'].n : WHO['1'].n) :
+            'Not paid yet this month')) + '</div>';
+
+    /* other fixed */
+    $('fixedSum').innerHTML = aed(fixedTotal()) + '<span class="php">' + toPhp(fixedTotal()) + '</span>';
+    $('fixedList').innerHTML = data.fixed.map(function (x) { return rowHTML(x, 'fixed'); }).join('') || '<div class="empty">No other fixed bills.</div>';
+
+    /* expenses */
+    $('expSum').innerHTML = aed(expTotal()) + '<span class="php">' + toPhp(expTotal()) + '</span>';
+    var xs = m.exp.slice().sort(function (a, b2) { return (b2.day || 0) - (a.day || 0); });
+    $('expList').innerHTML = xs.length ? xs.map(function (x) { return rowHTML(x, 'exp'); }).join('') : '<div class="empty">No expenses logged this month.<br>Tap \u201cAdd expense\u201d below.</div>';
+
+    /* split */
+    var p1 = paidBy('1'), p2 = paidBy('2'), owe = (p1 - p2) / 2;
+    $('splitCard').innerHTML =
+      '<div class="who-row"><span class="nm"><i style="background:var(--p1)"></i>' + WHO['1'].n + ' paid</span><span class="v num">' + aed(p1) + '</span></div>' +
+      '<div class="who-row"><span class="nm"><i style="background:var(--p2)"></i>' + WHO['2'].n + ' paid</span><span class="v num">' + aed(p2) + '</span></div>' +
+      '<div class="settle">' + (Math.abs(owe) < 1 ? 'You\u2019re even this month. \uD83C\uDF89' :
+        (owe > 0 ? '<b>' + WHO['2'].n + '</b> owes <b>' + WHO['1'].n + '</b> <b>' + aed(owe) + '</b> <span class="php">' + toPhp(owe) + '</span>'
+                 : '<b>' + WHO['1'].n + '</b> owes <b>' + WHO['2'].n + '</b> <b>' + aed(-owe) + '</b> <span class="php">' + toPhp(-owe) + '</span>')) +
+      '<br><span style="color:var(--dim);font-size:12.5px">Rent is tracked separately above.</span></div>';
+
+    /* savings */
+    var sTotal = (+m.saved['1'] || 0) + (+m.saved['2'] || 0);
+    $('saveSum').innerHTML = aed(sTotal) + '<span class="php">' + toPhp(sTotal) + '</span>';
+    $('saveCard').innerHTML = ['1', '2'].map(function (w) {
+      return '<div class="halfrow"><span class="nm"><i style="background:' + WHO[w].c + '"></i>' + WHO[w].n + ' saved</span>' +
+        '<span class="share num">' + aed(m.saved[w] || 0) + '</span>' +
+        '<button class="pay" data-save="' + w + '">Set amount</button></div>';
+    }).join('') + '<div class="rstatus" style="color:var(--muted)">' +
+      (sTotal > 0 ? 'That\u2019s ' + toPhp(sTotal).replace('\u2248 ', '') + ' set aside together.' : 'Set what each of you saved this month.') + '</div>';
+
+    /* breakdown */
+    var byCat = {}; byCat['rent'] = (+data.rent || 0);
+    data.fixed.concat(m.exp).forEach(function (x) { byCat[x.cat] = (byCat[x.cat] || 0) + (+x.amount || 0); });
+    var rows = CATS.filter(function (c) { return byCat[c.id]; }).map(function (c) { return { c: c, v: byCat[c.id] }; }).sort(function (a, b2) { return b2.v - a.v; });
+    $('cats').innerHTML = rows.length ? rows.map(function (r) {
+      var pc = t > 0 ? (r.v / t) * 100 : 0;
+      return '<div class="catrow"><div class="catlbl"><span>' + r.c.icon + ' ' + r.c.n + '</span><span class="num">' + aed(r.v) + ' \u00b7 ' + Math.round(pc) + '%</span></div>' +
+        '<div class="catbar"><i style="width:' + pc + '%;background:' + r.c.col + '"></i></div></div>';
+    }).join('') : '<div class="empty">Nothing to break down yet.</div>';
+
+    save();
+  }
+
+  function rowHTML(x, kind) {
+    var c = cat(x.cat), w = WHO[x.who] || WHO.share;
+    var wcls = x.who === '1' ? 'who-1' : (x.who === '2' ? 'who-2' : 'who-share');
+    return '<div class="row editable" data-edit="' + kind + '" data-id="' + x.id + '">' +
+      '<span class="ic">' + c.icon + '</span>' +
+      '<div class="body"><div class="name">' + esc(x.name) + '</div><div class="meta">' + c.n + (x.day ? ' \u00b7 ' + dayLabel(x.day) : '') + '</div></div>' +
+      '<span class="tag-who ' + wcls + '">' + w.n + '</span>' +
+      '<span class="amt num">' + aed(x.amount) + '<span class="php">' + toPhp(x.amount) + '</span></span>' +
+      '<button class="del" data-del="' + kind + '" data-id="' + x.id + '" aria-label="Delete">&times;</button></div>';
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  $('prevM').addEventListener('click', function () { view.setMonth(view.getMonth() - 1); render(); });
+  $('nextM').addEventListener('click', function () { view.setMonth(view.getMonth() + 1); render(); });
+
+  document.addEventListener('click', function (e) {
+    var rent = e.target.closest('[data-rent]');
+    if (rent) { var w = rent.dataset.rent; M().rentPaid[w] = !M().rentPaid[w]; render(); return; }
+    var sv = e.target.closest('[data-save]');
+    if (sv) {
+      var w2 = sv.dataset.save;
+      var v = prompt(WHO[w2].n + ' saved this month (AED):', M().saved[w2] || 0);
+      if (v !== null && !isNaN(+v) && +v >= 0) { M().saved[w2] = +v; render(); }
+      return;
+    }
+    var d = e.target.closest('[data-del]');
+    if (d) { e.stopPropagation(); var kind = d.dataset.del, id = d.dataset.id;
+      if (kind === 'fixed') data.fixed = data.fixed.filter(function (x) { return x.id !== id; });
+      else M().exp = M().exp.filter(function (x) { return x.id !== id; });
+      render(); return; }
+    if (e.target.closest('[data-editrent]') || e.target.id === 'rentBig') { openSheet('rent', null); return; }
+    var ed = e.target.closest('[data-edit]');
+    if (ed) openSheet(ed.dataset.edit, ed.dataset.id);
+  });
+
+  var draft = null, editKind = null, lastFocus = null;
+  function openSheet(kind, id) {
+    editKind = kind; lastFocus = document.activeElement;
+    if (kind === 'rent') {
+      draft = { rent: +data.rent || 0, mode: (data.rentSplit || {}).mode === 'custom' ? 'custom' : 'half', share1: rentShares()['1'] };
+    }
+    else if (id) { var list = kind === 'fixed' ? data.fixed : M().exp; var f = list.filter(function (x) { return x.id === id; })[0];
+      draft = f ? JSON.parse(JSON.stringify(f)) : blank(kind); }
+    else draft = blank(kind);
+    paintSheet();
+    $('scrim').classList.add('up'); $('sheet').classList.add('up'); document.body.style.overflow = 'hidden';
+    setTimeout(function () { var el = $('fRent') || $('fName'); if (el) el.focus(); }, 60);
+  }
+  function blank(kind) { return { id: null, name: '', amount: '', cat: kind === 'fixed' ? 'rent' : 'food', who: 'share', day: kind === 'exp' ? (key(new Date()) === key(view) ? new Date().getDate() : 1) : null }; }
+  function closeSheet() { $('scrim').classList.remove('up'); $('sheet').classList.remove('up'); document.body.style.overflow = ''; draft = null; if (lastFocus && lastFocus.focus) lastFocus.focus(); }
+
+  function paintSheet() {
+    if (editKind === 'rent') { paintRentSheet(); return; }
+    var isFixed = editKind === 'fixed';
+    var title = draft.id ? 'Edit' : (isFixed ? 'Add a fixed bill' : 'Add an expense');
+    var catBtns = CATS.map(function (c) { return '<button type="button" data-cat="' + c.id + '" aria-pressed="' + (draft.cat === c.id) + '">' + c.icon + ' ' + c.n + '</button>'; }).join('');
+    var whoBtns = ['1', '2', 'share'].map(function (w) { return '<button type="button" data-w="' + w + '" aria-pressed="' + (draft.who === w) + '">' + WHO[w].n + '</button>'; }).join('');
+    $('sheetIn').innerHTML =
+      '<h3>' + title + '</h3>' +
+      '<div class="field"><label>What is it?</label><input type="text" id="fName" value="' + esc(draft.name) + '" placeholder="' + (isFixed ? 'Gym, Netflix, insurance\u2026' : 'Groceries, dinner, taxi\u2026') + '" /></div>' +
+      '<div class="field"><label>How much (AED)?</label><div class="money"><span>AED</span><input type="number" inputmode="decimal" id="fAmt" value="' + (draft.amount || '') + '" placeholder="0" min="0" step="0.01" /></div><p class="hint" id="fPhp"></p></div>' +
+      '<div class="field"><label>Category</label><div class="chips-pick" id="fCat">' + catBtns + '</div></div>' +
+      '<div class="field"><label>Who paid?</label><div class="chips-pick who-pick" id="fWho">' + whoBtns + '</div></div>' +
+      (isFixed ? '' : '<div class="field"><label>Date</label><input type="date" id="fDay" value="' + isoDate(draft.day) + '" min="' + isoDate(1) + '" max="' + isoDate(daysIn(view)) + '" /><p class="hint">Any day in ' + monthName(view) + '.</p></div>') +
+      '<div class="sheet-acts"><button type="button" class="cancel" id="fCancel">Cancel</button><button type="button" class="save" id="fSave">' + (draft.id ? 'Save changes' : 'Add') + '</button></div>';
+    $('fName').addEventListener('input', function () { draft.name = this.value; syncSave(); });
+    $('fAmt').addEventListener('input', function () { draft.amount = this.value; syncSave(); phpHint(); });
+    if ($('fDay')) $('fDay').addEventListener('input', function () {
+      var p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(this.value);
+      draft.day = p ? Math.max(1, Math.min(daysIn(view), +p[3])) : null;
+    });
+    $('fCat').addEventListener('click', function (e) { var b = e.target.closest('[data-cat]'); if (!b) return; draft.cat = b.dataset.cat; this.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
+    $('fWho').addEventListener('click', function (e) { var b = e.target.closest('[data-w]'); if (!b) return; draft.who = b.dataset.w; this.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
+    $('fCancel').addEventListener('click', closeSheet);
+    $('fSave').addEventListener('click', commit);
+    syncSave(); phpHint();
+  }
+  /* ---- rent sheet: change the amount, and how the two of you split it ---- */
+  function paintRentSheet() {
+    var modes = [['half', 'Split in half'], ['custom', 'Custom split']];
+    $('sheetIn').innerHTML =
+      '<h3>Monthly rent</h3>' +
+      '<div class="field"><label>Rent for the flat (AED)</label>' +
+        '<div class="money"><span>AED</span><input type="number" inputmode="decimal" id="fRent" value="' + (draft.rent || '') + '" min="0" step="0.01" placeholder="0" /></div>' +
+        '<p class="hint" id="fRentPhp"></p></div>' +
+      '<div class="field"><label>How do you split it?</label><div class="chips-pick" id="fMode">' +
+        modes.map(function (m) { return '<button type="button" data-mode="' + m[0] + '" aria-pressed="' + (draft.mode === m[0]) + '">' + m[1] + '</button>'; }).join('') +
+      '</div></div>' +
+      '<div class="field" id="fShareWrap"' + (draft.mode === 'custom' ? '' : ' hidden') + '>' +
+        '<label>' + WHO['1'].n + '\u2019s share (AED)</label>' +
+        '<div class="money"><span>AED</span><input type="number" inputmode="decimal" id="fShare1" value="' + (draft.share1 || '') + '" min="0" step="0.01" placeholder="0" /></div>' +
+        '<p class="hint" id="fShareHint"></p></div>' +
+      '<p class="hint">Applies to every month. Anyone marked paid stays paid.</p>' +
+      '<div class="sheet-acts"><button type="button" class="cancel" id="fCancel">Cancel</button><button type="button" class="save" id="fSave">Save</button></div>';
+
+    $('fRent').addEventListener('input', function () {
+      draft.rent = this.value;
+      if (draft.mode !== 'custom') { draft.share1 = (+this.value || 0) / 2; $('fShare1').value = draft.share1 || ''; }
+      rentHints();
+    });
+    $('fShare1').addEventListener('input', function () { draft.share1 = this.value; rentHints(); });
+    $('fMode').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-mode]'); if (!b) return;
+      draft.mode = b.dataset.mode;
+      this.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
+      $('fShareWrap').hidden = draft.mode !== 'custom';
+      if (draft.mode !== 'custom') draft.share1 = (+draft.rent || 0) / 2;
+      $('fShare1').value = draft.share1 || '';
+      rentHints();
+      if (draft.mode === 'custom') $('fShare1').focus();
+    });
+    $('fCancel').addEventListener('click', closeSheet);
+    $('fSave').addEventListener('click', commitRent);
+    rentHints();
+  }
+  function rentNum(v) { var s = String(v == null ? '' : v).trim(); return s === '' || isNaN(+s) ? null : +s; }
+  function rentHints() {
+    var r = rentNum(draft.rent);
+    $('fRentPhp').textContent = r > 0 ? '\u2248 \u20B1' + Math.round(r * (+data.fx || 0)).toLocaleString('en-PH') : '';
+    var s1 = draft.mode === 'custom' ? (rentNum(draft.share1) || 0) : (r || 0) / 2;
+    var bad = r != null && (s1 < 0 || s1 > r);
+    var h = $('fShareHint');
+    h.textContent = bad ? WHO['1'].n + '\u2019s share has to be between 0 and ' + aed(r) + '.'
+      : (r == null ? '' : WHO['2'].n + ' pays the rest: ' + aed(r - s1) + ' \u00B7 ' + toPhp(r - s1));
+    h.style.color = bad ? 'var(--rose)' : '';
+    $('fSave').disabled = r == null || r < 0 || bad;
+  }
+  function commitRent() {
+    var r = rentNum(draft.rent);
+    if (r == null || r < 0) return;
+    var s1 = draft.mode === 'custom' ? (rentNum(draft.share1) || 0) : r / 2;
+    if (s1 < 0 || s1 > r) return;
+    data.rent = r;
+    data.rentSplit = { mode: draft.mode === 'custom' ? 'custom' : 'half', share1: s1 };
+    closeSheet(); render();
+  }
+
+  function phpHint() { var el = $('fPhp'); if (el) el.textContent = +draft.amount > 0 ? '\u2248 \u20B1' + Math.round(+draft.amount * (+data.fx || 0)).toLocaleString('en-PH') : ''; }
+  function syncSave() { $('fSave').disabled = !(draft.name.trim() && +draft.amount > 0); }
+  function commit() {
+    if (!draft.name.trim() || !(+draft.amount > 0)) return;
+    draft.amount = +draft.amount;
+    if (editKind === 'fixed') { if (draft.id) data.fixed = data.fixed.map(function (x) { return x.id === draft.id ? draft : x; }); else { draft.id = uid(); data.fixed.push(draft); } }
+    else { var list = M().exp; if (draft.id) M().exp = list.map(function (x) { return x.id === draft.id ? draft : x; }); else { draft.id = uid(); list.push(draft); } }
+    closeSheet(); render();
+  }
+
+  $('addExp').addEventListener('click', function () { openSheet('exp', null); });
+  $('addFixed').addEventListener('click', function () { openSheet('fixed', null); });
+  $('scrim').addEventListener('click', closeSheet);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && draft) closeSheet(); });
+
+  $('budget').style.cursor = 'pointer';
+  $('budget').addEventListener('click', function () { var v = prompt('Monthly budget (AED):', data.budget); if (v !== null && !isNaN(+v) && +v >= 0) { data.budget = +v; render(); } });
+  $('fxEdit').addEventListener('click', function () { var v = prompt('AED \u2192 PHP rate (today \u2248 17.04):', data.fx); if (v !== null && !isNaN(+v) && +v > 0) { data.fx = +v; render(); } });
+  $('wipe').addEventListener('click', function () { if (confirm('Clear all expenses for ' + monthName(view) + '? Rent, bills and savings stay.')) { M().exp = []; render(); } });
+
+  render();
+})();
+</script>
+</body>
+</html>
