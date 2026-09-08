@@ -1,13 +1,17 @@
 <!-- ===========================================================
      Rent & Budget Tracker — personal use (AED, Dubai)
-     For JC and his partner. Rent starts at 1,200 AED split in half —
+     This tracks KIARA's money. JC is a contributor, not a second budget:
+     he pays a share of the rent (and anything tagged to him), and that money
+     never comes off her monthly budget. Her savings goal is hers.
+     Rent starts at 1,200 AED split in half —
      tap "Edit" on the rent card to change the amount or give each of you
      a custom share. Expense tracking so you can both see spending and
      save; every amount also shown in PHP at an editable rate.
 
      The rent you set applies to every month, not just the one on screen.
      Savings are logged one deposit at a time and add up across every month,
-     measured against an editable goal.
+     measured against an editable goal. Setting money aside uses up the budget
+     just like spending does, so the Overview headline counts both.
 
      Data is saved in THIS browser (localStorage). It survives refresh,
      but does NOT sync between phones — each device keeps its own copy.
@@ -16,6 +20,8 @@
 
      The AED→PHP rate is manual (tap it to update). A static file can't
      fetch a live rate on its own, and a manual rate never breaks.
+     Four tabs (Overview / Bills / Spending / Savings) instead of one long
+     scroll; the bottom button adds whatever the open tab is about.
      Deploy: rename to index.html, drop at netlify.com/drop or its own repo.
      =========================================================== -->
 <!DOCTYPE html>
@@ -34,12 +40,15 @@
     --line: rgba(255,255,255,0.08); --line-2: rgba(255,255,255,0.05);
     --text: #EDF0F5; --muted: #8A93A6; --dim: #5D6577;
     --mint: #35D0A5; --mint-deep: #1FAE86; --rose: #FB7185; --amber: #FBBF24;
-    --p1: #6E8BFF; --p2: #F4A0C0;
+    --p1: #6E8BFF; --p2: #F4A0C0; --save: #7DD3FC;
     --display: 'Sora', system-ui, sans-serif; --body: 'Inter', system-ui, sans-serif;
     --wrap: 720px;
     color-scheme: dark;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* author display rules (e.g. .month button) otherwise beat the UA's
+     [hidden] { display: none }, leaving hidden elements on screen */
+  [hidden] { display: none !important; }
   html { -webkit-text-size-adjust: 100%; }
   body { background: var(--bg); color: var(--text); font-family: var(--body); line-height: 1.5; -webkit-font-smoothing: antialiased; padding: 0 0 120px; }
   h1, h2, h3 { font-family: var(--display); font-weight: 700; letter-spacing: -0.02em; }
@@ -56,12 +65,18 @@
   .month { display: flex; align-items: center; gap: 6px; }
   .month button { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--text); font-size: 15px; display: grid; place-items: center; transition: border-color .15s; }
   .month button:hover { border-color: var(--muted); }
-  .month .lbl { font-family: var(--display); font-weight: 600; font-size: 14.5px; min-width: 118px; text-align: center; }
+  .month .lbl { font-family: var(--display); font-weight: 600; font-size: 14.5px; min-width: 78px; text-align: center; }
 
-  .fxbar { display: flex; align-items: center; justify-content: center; gap: 7px; font-size: 12px; color: var(--muted); padding: 8px 0; border-bottom: 1px solid var(--line-2); background: var(--card); }
-  .fxbar b { color: var(--text); font-weight: 600; }
-  .fxbar button { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 7px; padding: 3px 9px; font-size: 11.5px; transition: .15s; }
-  .fxbar button:hover { color: var(--text); border-color: var(--muted); }
+  .month .today { width: auto; padding: 0 9px; font-size: 11.5px; font-weight: 600; color: var(--mint); border-color: var(--mint); }
+
+  .tabs { display: flex; align-items: center; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs .t { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); font-size: 13px; font-weight: 600; padding: 9px 5px; white-space: nowrap; transition: color .15s, border-color .15s; }
+  .tabs .t:hover { color: var(--text); }
+  .tabs .t[aria-selected="true"] { color: var(--text); border-bottom-color: var(--mint); }
+  .tabs .fx { margin-left: auto; padding-left: 10px; background: none; border: none; color: var(--dim); font-size: 11.5px; white-space: nowrap; transition: color .15s; }
+  .tabs .fx b { color: var(--muted); font-weight: 600; }
+  .tabs .fx:hover, .tabs .fx:hover b { color: var(--text); }
 
   .top { padding: 24px 0 8px; }
   .hero-fig { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -71,16 +86,22 @@
   .of { color: var(--dim); font-size: 15px; }
   .of #budget { border-bottom: 1px dashed var(--line); cursor: pointer; }
   .of #budget:hover { color: var(--text); border-bottom-color: var(--muted); }
-  .barline { height: 8px; background: var(--card-2); border-radius: 100px; overflow: hidden; margin: 18px 0 8px; }
-  .barline i { display: block; height: 100%; background: var(--mint); border-radius: 100px; transition: width .4s cubic-bezier(.2,.9,.25,1); }
+  .barline { height: 8px; background: var(--card-2); border-radius: 100px; overflow: hidden; margin: 18px 0 8px; display: flex; }
+  .barline i { display: block; height: 100%; background: var(--mint); transition: width .4s cubic-bezier(.2,.9,.25,1); }
   .barline i.over { background: var(--rose); }
+  .barline i.save { background: var(--save); }
   .undertext { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
   .undertext b { font-weight: 600; }
+  /* legend for the two bar segments, and the split of the headline figure */
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 9px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 8px; height: 8px; border-radius: 50%; font-style: normal; flex: none; }
   .left-good { color: var(--mint); } .left-bad { color: var(--rose); }
-  .mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
+  .mini { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 20px; }
   .chip { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
   .chip .k { font-size: 12px; color: var(--muted); }
   .chip .v { font-family: var(--display); font-weight: 600; font-size: 1.2rem; letter-spacing: -0.03em; margin-top: 4px; }
+  .chip .v.save { color: var(--save); }
 
   .sec { margin-top: 30px; }
   .sec-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
@@ -105,7 +126,9 @@
   .halfrow .nm i { width: 9px; height: 9px; border-radius: 50%; font-style: normal; flex: none; }
   .halfrow .share { font-family: var(--display); font-weight: 600; font-size: 1rem; text-align: right; }
   .halfrow .share .php { display: block; font-size: 11px; font-weight: 400; }
-  .halfrow .pay { border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 9px; padding: 8px 14px; font-size: 12.5px; font-weight: 600; white-space: nowrap; transition: .15s; display: flex; align-items: center; gap: 6px; }
+  .halfrow .pay { border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 9px; padding: 8px 14px; font-size: 12.5px; font-weight: 600; white-space: nowrap; transition: .15s; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 96px; }
+  /* keeps amounts on buttonless rows in line with the ones that have a button */
+  .halfrow .paygap { width: 96px; flex: none; }
   .halfrow .pay:hover { border-color: var(--muted); color: var(--text); }
   .halfrow .pay.paid { background: rgba(53,208,165,.14); border-color: var(--mint); color: var(--mint); }
   .rent .rstatus { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13.5px; }
@@ -113,7 +136,7 @@
   .rent .rstatus.wait { color: var(--amber); }
   .rent .rstatus.muted { color: var(--muted); }
 
-  .row { display: grid; grid-template-columns: 34px 1fr auto auto; gap: 12px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px; }
+  .row { display: grid; grid-template-columns: 34px 1fr auto auto auto; gap: 12px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px; }
   .row .ic { width: 34px; height: 34px; border-radius: 10px; background: var(--card-2); display: grid; place-items: center; font-size: 15px; }
   .row .body { min-width: 0; }
   .row .name { font-weight: 500; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -129,15 +152,6 @@
   .who-2 { background: rgba(244,160,192,.16); color: var(--p2); }
   .who-share { background: var(--card-2); color: var(--muted); }
   .empty { text-align: center; color: var(--dim); font-size: 13.5px; padding: 22px; border: 1px dashed var(--line-2); border-radius: 14px; }
-
-  .split { background: linear-gradient(160deg, var(--card), var(--card-2)); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
-  .split .who-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; border-bottom: 1px solid var(--line-2); }
-  .split .who-row:last-of-type { border-bottom: none; }
-  .split .who-row .nm { color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  .split .who-row .nm i { width: 8px; height: 8px; border-radius: 50%; font-style: normal; }
-  .split .who-row .v { font-family: var(--display); font-weight: 600; }
-  .split .settle { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
-  .split .settle b { color: var(--mint); font-weight: 600; }
 
   .cats { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
   .catrow .catlbl { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px; }
@@ -179,6 +193,7 @@
   .footnote button { background: none; border: none; color: var(--rose); font-size: 12px; text-decoration: underline; }
 
   @media (min-width: 600px) {
+    .mini { grid-template-columns: repeat(4, 1fr); }
     .dock { padding-bottom: 20px; }
     .sheet { left: 50%; right: auto; transform: translate(-50%, 100%); width: 480px; border-radius: 22px; bottom: 20px; border: 1px solid var(--line); }
     .sheet.up { transform: translateX(-50%); }
@@ -193,80 +208,89 @@
     <span class="who">Our <i>Budget</i></span>
     <div class="month">
       <button id="prevM" aria-label="Previous month">&#8249;</button>
-      <span class="lbl" id="mLabel"></span>
+      <span class="lbl num" id="mLabel"></span>
       <button id="nextM" aria-label="Next month">&#8250;</button>
+      <button class="today" id="todayBtn" hidden>Today</button>
     </div>
   </div>
-  <div class="fxbar">1 AED = <b id="fxVal"></b> PHP <button id="fxEdit">update</button></div>
+  <nav class="wrap tabs" role="tablist" aria-label="Sections">
+    <button class="t" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true"  data-go="overview">Overview</button>
+    <button class="t" role="tab" id="tab-bills"    aria-controls="panel-bills"    aria-selected="false" data-go="bills">Bills</button>
+    <button class="t" role="tab" id="tab-spending" aria-controls="panel-spending" aria-selected="false" data-go="spending">Spending</button>
+    <button class="t" role="tab" id="tab-savings"  aria-controls="panel-savings"  aria-selected="false" data-go="savings">Savings</button>
+    <button class="fx" id="fxEdit" aria-label="Exchange rate, tap to update">AED&#8594;&#8369; <b id="fxVal"></b></button>
+  </nav>
 </header>
 
 <main class="wrap">
-  <section class="top">
-    <div class="hero-fig"><span class="lead">Spent this month</span></div>
-    <div class="hero-fig">
-      <span class="spent num" id="spent">0 AED<span class="php" id="spentPhp"></span></span>
-      <span class="of">of <span id="budget">0 AED</span></span>
-    </div>
-    <div class="barline"><i id="bar"></i></div>
-    <div class="undertext"><span id="pace"></span><span id="left"></span></div>
-    <div class="mini">
-      <div class="chip"><div class="k">Rent (your share)</div><div class="v num" id="mRent">0</div></div>
-      <div class="chip"><div class="k">Other bills</div><div class="v num" id="mBills">0</div></div>
-      <div class="chip"><div class="k">Day-to-day</div><div class="v num" id="mDay">0</div></div>
-    </div>
-  </section>
 
-  <!-- RENT SPLIT -->
-  <section class="sec">
-    <div class="sec-h"><h2>Rent for the flat</h2></div>
-    <div class="rent" id="rentCard"></div>
-  </section>
+  <div id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" data-panel="overview">
+    <section class="top">
+      <div class="hero-fig"><span class="lead">Kiara used this month</span></div>
+      <div class="hero-fig">
+        <span class="spent num" id="spent">0 AED</span>
+        <span class="of">of <span id="budget">0 AED</span></span>
+      </div>
+      <div class="barline"><i id="bar"></i><i class="save" id="barSave"></i></div>
+      <div class="undertext"><span id="pace"></span><span id="left"></span></div>
+      <div class="legend" id="usedNote"></div>
+      <div class="mini">
+        <div class="chip"><div class="k">Rent (her share)</div><div class="v num" id="mRent">0</div></div>
+        <div class="chip"><div class="k">Other bills</div><div class="v num" id="mBills">0</div></div>
+        <div class="chip"><div class="k">Day-to-day</div><div class="v num" id="mDay">0</div></div>
+        <div class="chip"><div class="k">Saved (her own)</div><div class="v num save" id="mSave">0</div></div>
+      </div>
+    </section>
 
-  <!-- OTHER FIXED -->
-  <section class="sec">
-    <div class="sec-h"><h2>Other fixed bills</h2><span class="sum num" id="fixedSum">0</span></div>
-    <div id="fixedList"></div>
-    <button class="add-line" id="addFixed">+ Add a fixed bill</button>
-  </section>
+    <section class="sec">
+      <div class="sec-h"><h2>JC&rsquo;s contribution</h2></div>
+      <div class="rent" id="contribCard"></div>
+    </section>
 
-  <!-- EXPENSES -->
-  <section class="sec">
-    <div class="sec-h"><h2>Expenses</h2><span class="sum num" id="expSum">0</span></div>
-    <div id="expList"></div>
-  </section>
+    <section class="sec">
+      <div class="sec-h"><h2>Where it went</h2></div>
+      <div class="cats" id="cats"></div>
+    </section>
 
-  <!-- SPLIT -->
-  <section class="sec">
-    <div class="sec-h"><h2>Who paid what</h2></div>
-    <div class="split" id="splitCard"></div>
-  </section>
+    <p class="footnote">Saved on this device only &mdash; it won&rsquo;t sync to another phone.</p>
+  </div>
 
-  <!-- SAVINGS -->
-  <section class="sec">
-    <div class="sec-h"><h2>Saved this month</h2><span class="sum num" id="saveSum">0</span></div>
-    <div id="depList"></div>
-    <button class="add-line" id="addDep">+ Add to savings</button>
-  </section>
+  <div id="panel-bills" role="tabpanel" aria-labelledby="tab-bills" data-panel="bills" hidden>
+    <section class="sec">
+      <div class="sec-h"><h2>Rent for the flat</h2></div>
+      <div class="rent" id="rentCard"></div>
+    </section>
 
-  <!-- SAVINGS GOAL -->
-  <section class="sec">
-    <div class="sec-h"><h2>Savings goal</h2></div>
-    <div class="rent" id="goalCard"></div>
-  </section>
+    <section class="sec">
+      <div class="sec-h"><h2>Other fixed bills</h2><span class="sum num" id="fixedSum">0</span></div>
+      <div id="fixedList"></div>
+    </section>
+  </div>
 
-  <!-- BREAKDOWN -->
-  <section class="sec">
-    <div class="sec-h"><h2>Where it went</h2></div>
-    <div class="cats" id="cats"></div>
-  </section>
+  <div id="panel-spending" role="tabpanel" aria-labelledby="tab-spending" data-panel="spending" hidden>
+    <section class="sec">
+      <div class="sec-h"><h2>Expenses</h2><span class="sum num" id="expSum">0</span></div>
+      <div id="expList"></div>
+    </section>
 
-  <p class="footnote">
-    Saved on this device only — it won't sync to another phone.<br>
-    <button id="wipe">Clear this month's expenses</button>
-  </p>
+    <p class="footnote"><button id="wipe">Clear this month&rsquo;s expenses</button></p>
+  </div>
+
+  <div id="panel-savings" role="tabpanel" aria-labelledby="tab-savings" data-panel="savings" hidden>
+    <section class="sec">
+      <div class="sec-h"><h2>Savings goal</h2></div>
+      <div class="rent" id="goalCard"></div>
+    </section>
+
+    <section class="sec">
+      <div class="sec-h"><h2>Saved this month</h2><span class="sum num" id="saveSum">0</span></div>
+      <div id="depList"></div>
+    </section>
+  </div>
+
 </main>
 
-<div class="dock"><div class="in"><button id="addExp">+ Add expense</button></div></div>
+<div class="dock"><div class="in"><button id="addBtn">+ Add expense</button></div></div>
 
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Add or edit">
@@ -281,6 +305,10 @@
   var KEY = 'ourbudget_aed_v1';
 
   var WHO = { '1': { n: 'JC', c: 'var(--p1)' }, '2': { n: 'Kiara', c: 'var(--p2)' }, 'share': { n: 'Shared', c: 'var(--muted)' } };
+  // The monthly budget belongs to ONE person - Kiara. JC is a contributor: he
+  // pays his share of the rent, and that money is his, so it must never come
+  // off her budget. Same for anything else tagged to him, savings included.
+  var OWNER = '2', HELPER = '1';
   var CATS = [
     { id: 'rent', n: 'Rent & bills', icon: '🏠', col: '#6E8BFF' },
     { id: 'food', n: 'Food', icon: '🍜', col: '#35D0A5' },
@@ -339,8 +367,27 @@
   }
 
   var view = new Date(); view.setDate(1);
+
+  // four panels instead of one 4-screen scroll; the dock's primary action
+  // follows whichever panel is open, so there is one add button, not three
+  var DOCK = {
+    overview: { label: '+ Add expense',       kind: 'exp' },
+    bills:    { label: '+ Add a fixed bill',  kind: 'fixed' },
+    spending: { label: '+ Add expense',       kind: 'exp' },
+    savings:  { label: '+ Add to savings',    kind: 'dep' }
+  };
+  var tab = 'overview';
+  function setTab(t) {
+    if (!DOCK[t]) t = 'overview';
+    tab = t;
+    document.querySelectorAll('[data-go]').forEach(function (b) { b.setAttribute('aria-selected', b.dataset.go === t); });
+    document.querySelectorAll('[data-panel]').forEach(function (pl) { pl.hidden = pl.dataset.panel !== t; });
+    $('addBtn').textContent = DOCK[t].label;
+    window.scrollTo(0, 0);
+  }
   function key(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2); }
   function monthName(d) { return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }); }
+  function monthShort(d) { return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); }
   function daysIn(d) { return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); }
   // an expense only stores its day — the month and year come from the month
   // bucket it lives in, so a real date is that day inside the month on screen
@@ -373,47 +420,56 @@
   function fixedTotal() { return data.fixed.reduce(function (s, x) { return s + (+x.amount || 0); }, 0); }
   function expTotal() { return M().exp.reduce(function (s, x) { return s + (+x.amount || 0); }, 0); }
   function depTotal(m) { return (m.dep || []).reduce(function (s, x) { return s + (+x.amount || 0); }, 0); }
+  function depBy(m, w) { return (m.dep || []).reduce(function (s, x) { return s + (x.who === w ? (+x.amount || 0) : 0); }, 0); }
   // savings accumulate, so the figure that matters spans every month on record
   function savedAllTime() { return Object.keys(data.months).reduce(function (s, k) { return s + depTotal(data.months[k]); }, 0); }
   // "spent" from JC's side = his rent half + his share of other fixed + his expenses share
-  function total() { return (+data.rent || 0) + fixedTotal() + expTotal(); }
-
-  function paidBy(w) {
-    var sum = 0;
-    // rent: each pays their half when marked paid... but for split math we count committed shares
-    // other fixed + expenses:
-    data.fixed.concat(M().exp).forEach(function (x) {
-      var a = +x.amount || 0;
-      if (x.who === w) sum += a; else if (x.who === 'share') sum += a / 2;
-    });
-    return sum;
-  }
+  // full totals stay full - the Bills and Spending tabs show real bill amounts
+  function ownerSum(list) { return list.reduce(function (s, x) { return s + (x.who === HELPER ? 0 : (+x.amount || 0)); }, 0); }
+  function total() { return rentShares()[OWNER] + ownerSum(data.fixed) + ownerSum(M().exp); }
 
   function render() {
-    $('mLabel').textContent = monthName(view);
+    $('mLabel').textContent = monthShort(view);
+    $('todayBtn').hidden = key(new Date()) === key(view);
     $('fxVal').textContent = (+data.fx).toFixed(2);
 
+    var m = M(), sTotal = depTotal(m), ownerSaved = depBy(m, OWNER);
     var t = total(), b = +data.budget || 0;
-    $('spent').innerHTML = aed(t) + '<span class="php">' + toPhp(t) + '</span>';
+    // both spending and saving use up the budget, so the headline counts both;
+    // that keeps headline + "left to spend" adding up to the budget exactly
+    var used = t + ownerSaved;
+    $('spent').innerHTML = aed(used) + '<span class="php">' + toPhp(used) + '</span>';
     $('budget').textContent = aed(b);
+    $('usedNote').innerHTML = ownerSaved > 0
+      ? '<span><i style="background:var(--mint)"></i>' + aed(t) + ' spent</span>' +
+        '<span><i style="background:var(--save)"></i>' + aed(ownerSaved) + ' set aside</span>'
+      : '';
+    // spent is money gone, saved is money committed - both stop being spendable,
+    // so the bar stacks them and what is left is what you can still freely use
+    var spentPct = b > 0 ? Math.min(100, (t / b) * 100) : 0;
+    var savePct = b > 0 ? Math.min(100 - spentPct, (ownerSaved / b) * 100) : 0;
     var barEl = $('bar');
-    barEl.style.width = Math.min(100, b > 0 ? (t / b) * 100 : 0) + '%';
+    barEl.style.width = spentPct + '%';
     barEl.classList.toggle('over', t > b && b > 0);
-    var left = b - t;
-    $('left').innerHTML = b > 0 ? (left >= 0 ? '<b class="left-good">' + aed(left) + ' left</b>' : '<b class="left-bad">' + aed(-left) + ' over</b>') : '';
+    $('barSave').style.width = savePct + '%';
+    var left = b - t - ownerSaved;
+    $('left').innerHTML = b > 0 ? (left >= 0 ? '<b class="left-good">' + aed(left) + ' left to spend</b>'
+                                             : '<b class="left-bad">' + aed(-left) + ' over</b>') : '';
     var now = new Date();
     if (key(now) === key(view) && b > 0) {
       var onPace = b * (now.getDate() / daysIn(view));
-      $('pace').textContent = t > onPace * 1.05 ? 'Ahead of pace' : (t < onPace * 0.95 ? 'Under pace' : 'On pace');
+      $('pace').textContent = 'Spending ' + (t > onPace * 1.05 ? 'ahead of pace' : (t < onPace * 0.95 ? 'under pace' : 'on pace'));
     } else { $('pace').textContent = ''; }
 
     var shares = rentShares();
-    $('mRent').innerHTML = aed(shares['1']) + '<span class="php">' + toPhp(shares['1']) + '</span>';
-    $('mBills').innerHTML = aed(fixedTotal()) + '<span class="php">' + toPhp(fixedTotal()) + '</span>';
-    $('mDay').innerHTML = aed(expTotal()) + '<span class="php">' + toPhp(expTotal()) + '</span>';
+    var oRent = shares[OWNER], oBills = ownerSum(data.fixed), oDay = ownerSum(m.exp);
+    $('mRent').innerHTML = aed(oRent) + '<span class="php">' + toPhp(oRent) + '</span>';
+    $('mBills').innerHTML = aed(oBills) + '<span class="php">' + toPhp(oBills) + '</span>';
+    $('mDay').innerHTML = aed(oDay) + '<span class="php">' + toPhp(oDay) + '</span>';
+    $('mSave').innerHTML = aed(ownerSaved) + '<span class="php">' + toPhp(ownerSaved) + '</span>';
 
     /* rent split card */
-    var m = M(), custom = (data.rentSplit || {}).mode === 'custom';
+    var custom = (data.rentSplit || {}).mode === 'custom';
     var bothPaid = m.rentPaid['1'] && m.rentPaid['2'];
     $('rentCard').innerHTML =
       '<div class="rtop"><h3>Monthly rent</h3><span class="big" id="rentBig">' + aed(data.rent) + '</span>' +
@@ -439,18 +495,33 @@
     var xs = m.exp.slice().sort(function (a, b2) { return (b2.day || 0) - (a.day || 0); });
     $('expList').innerHTML = xs.length ? xs.map(function (x) { return rowHTML(x, 'exp'); }).join('') : '<div class="empty">No expenses logged this month.<br>Tap \u201cAdd expense\u201d below.</div>';
 
-    /* split */
-    var p1 = paidBy('1'), p2 = paidBy('2'), owe = (p1 - p2) / 2;
-    $('splitCard').innerHTML =
-      '<div class="who-row"><span class="nm"><i style="background:var(--p1)"></i>' + WHO['1'].n + ' paid</span><span class="v num">' + aed(p1) + '</span></div>' +
-      '<div class="who-row"><span class="nm"><i style="background:var(--p2)"></i>' + WHO['2'].n + ' paid</span><span class="v num">' + aed(p2) + '</span></div>' +
-      '<div class="settle">' + (Math.abs(owe) < 1 ? 'You\u2019re even this month. \uD83C\uDF89' :
-        (owe > 0 ? '<b>' + WHO['2'].n + '</b> owes <b>' + WHO['1'].n + '</b> <b>' + aed(owe) + '</b> <span class="php">' + toPhp(owe) + '</span>'
-                 : '<b>' + WHO['1'].n + '</b> owes <b>' + WHO['2'].n + '</b> <b>' + aed(-owe) + '</b> <span class="php">' + toPhp(-owe) + '</span>')) +
-      '<br><span style="color:var(--dim);font-size:12.5px">Rent is tracked separately above.</span></div>';
+    /* what the helper puts in: his rent share, what he adds to her savings,
+       and anything tagged to him - none of which ever touched her budget */
+    var cRent = shares[HELPER];
+    var cSave = depBy(m, HELPER);
+    var cItems = data.fixed.concat(m.exp).reduce(function (sum, x) { return sum + (x.who === HELPER ? (+x.amount || 0) : 0); }, 0);
+    var cTotal = cRent + cSave + cItems;
+    var cPaid = !!m.rentPaid[HELPER];
+    var owing = cPaid ? 0 : cRent;
+    function contribRow(label, dot, v, btn) {
+      return '<div class="halfrow"><span class="nm"><i style="background:' + dot + '"></i>' + label + '</span>' +
+        '<span class="share num">' + aed(v) + '<span class="php">' + toPhp(v) + '</span></span>' +
+        (btn || '<span class="paygap"></span>') + '</div>';
+    }
+    $('contribCard').innerHTML =
+      '<div class="rtop"><h3>Total</h3><span class="big static num">' + aed(cTotal) + '</span></div>' +
+      '<p class="rsub">' + toPhp(cTotal) + ' · none of it counts against ' + WHO[OWNER].n + '’s budget</p>' +
+      contribRow('Rent share', WHO[HELPER].c, cRent,
+        '<button class="pay ' + (cPaid ? 'paid' : '') + '" data-rent="' + HELPER + '">' +
+        (cPaid ? '✓ Paid' : 'Mark paid') + '</button>') +
+      (cSave > 0 ? contribRow('Into ' + WHO[OWNER].n + '’s savings', 'var(--save)', cSave, null) : '') +
+      (cItems > 0 ? contribRow('Bills &amp; expenses covered', 'var(--muted)', cItems, null) : '') +
+      '<div class="rstatus ' + (owing > 0 ? 'wait' : (cTotal > 0 ? 'done' : 'muted')) + '">' +
+        (owing > 0 ? aed(owing) + ' still to hand over'
+                   : (cTotal > 0 ? '✓ All handed over for ' + monthName(view)
+                                 : 'Nothing to hand over this month')) + '</div>';
 
     /* savings logged this month, newest first */
-    var sTotal = depTotal(m);
     $('saveSum').innerHTML = aed(sTotal) + '<span class="php">' + toPhp(sTotal) + '</span>';
     var deps = m.dep.slice().sort(function (a, b2) { return (b2.day || 0) - (a.day || 0); });
     $('depList').innerHTML = deps.length ? deps.map(depRowHTML).join('')
@@ -472,11 +543,14 @@
                      : aed(togo) + ' to go · ' + toPhp(togo))) + '</div>';
 
     /* breakdown */
-    var byCat = {}; byCat['rent'] = (+data.rent || 0);
-    data.fixed.concat(m.exp).forEach(function (x) { byCat[x.cat] = (byCat[x.cat] || 0) + (+x.amount || 0); });
-    var rows = CATS.filter(function (c) { return byCat[c.id]; }).map(function (c) { return { c: c, v: byCat[c.id] }; }).sort(function (a, b2) { return b2.v - a.v; });
+    var byCat = {}; byCat['rent'] = shares[OWNER];
+    data.fixed.concat(m.exp).forEach(function (x) { if (x.who !== HELPER) byCat[x.cat] = (byCat[x.cat] || 0) + (+x.amount || 0); });
+    var rows = CATS.filter(function (c) { return byCat[c.id]; }).map(function (c) { return { c: c, v: byCat[c.id] }; });
+    if (ownerSaved > 0) rows.push({ c: { icon: '\uD83D\uDCB0', n: 'Savings', col: '#7DD3FC' }, v: ownerSaved });
+    rows.sort(function (a, b2) { return b2.v - a.v; });
+    var outgoing = t + ownerSaved;
     $('cats').innerHTML = rows.length ? rows.map(function (r) {
-      var pc = t > 0 ? (r.v / t) * 100 : 0;
+      var pc = outgoing > 0 ? (r.v / outgoing) * 100 : 0;
       return '<div class="catrow"><div class="catlbl"><span>' + r.c.icon + ' ' + r.c.n + '</span><span class="num">' + aed(r.v) + ' \u00b7 ' + Math.round(pc) + '%</span></div>' +
         '<div class="catbar"><i style="width:' + pc + '%;background:' + r.c.col + '"></i></div></div>';
     }).join('') : '<div class="empty">Nothing to break down yet.</div>';
@@ -705,9 +779,11 @@
     closeSheet(); render();
   }
 
-  $('addExp').addEventListener('click', function () { openSheet('exp', null); });
-  $('addFixed').addEventListener('click', function () { openSheet('fixed', null); });
-  $('addDep').addEventListener('click', function () { openSheet('dep', null); });
+  $('addBtn').addEventListener('click', function () { openSheet(DOCK[tab].kind, null); });
+  document.querySelectorAll('[data-go]').forEach(function (b) {
+    b.addEventListener('click', function () { setTab(b.dataset.go); });
+  });
+  $('todayBtn').addEventListener('click', function () { view = new Date(); view.setDate(1); render(); });
   $('scrim').addEventListener('click', closeSheet);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && draft) closeSheet(); });
 
@@ -716,6 +792,7 @@
   $('fxEdit').addEventListener('click', function () { var v = prompt('AED \u2192 PHP rate (today \u2248 17.04):', data.fx); if (v !== null && !isNaN(+v) && +v > 0) { data.fx = +v; render(); } });
   $('wipe').addEventListener('click', function () { if (confirm('Clear all expenses for ' + monthName(view) + '? Rent, bills and savings stay.')) { M().exp = []; render(); } });
 
+  setTab('overview');
   render();
 })();
 </script>
