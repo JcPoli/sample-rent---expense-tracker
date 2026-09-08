@@ -6,6 +6,8 @@
      save; every amount also shown in PHP at an editable rate.
 
      The rent you set applies to every month, not just the one on screen.
+     Savings are logged one deposit at a time and add up across every month,
+     measured against an editable goal.
 
      Data is saved in THIS browser (localStorage). It survives refresh,
      but does NOT sync between phones — each device keeps its own copy.
@@ -93,6 +95,8 @@
   .rent .rtop h3 { font-size: 1.05rem; flex: 1; min-width: 0; }
   .rent .rtop .big { font-family: var(--display); font-weight: 700; font-size: 1.4rem; letter-spacing: -0.03em; cursor: pointer; }
   .rent .rtop .big:hover { color: var(--mint); }
+  .rent .rtop .big.static { cursor: default; }
+  .rent .rtop .big.static:hover { color: inherit; }
   .rent .rtop .edit { border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 9px; padding: 6px 11px; font-size: 12px; font-weight: 600; white-space: nowrap; transition: .15s; }
   .rent .rtop .edit:hover { border-color: var(--mint); color: var(--mint); }
   .rent .rsub { font-size: 12.5px; color: var(--muted); margin-bottom: 16px; }
@@ -107,6 +111,7 @@
   .rent .rstatus { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13.5px; }
   .rent .rstatus.done { color: var(--mint); font-weight: 600; }
   .rent .rstatus.wait { color: var(--amber); }
+  .rent .rstatus.muted { color: var(--muted); }
 
   .row { display: grid; grid-template-columns: 34px 1fr auto auto; gap: 12px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px; }
   .row .ic { width: 34px; height: 34px; border-radius: 10px; background: var(--card-2); display: grid; place-items: center; font-size: 15px; }
@@ -239,7 +244,14 @@
   <!-- SAVINGS -->
   <section class="sec">
     <div class="sec-h"><h2>Saved this month</h2><span class="sum num" id="saveSum">0</span></div>
-    <div class="rent" id="saveCard"></div>
+    <div id="depList"></div>
+    <button class="add-line" id="addDep">+ Add to savings</button>
+  </section>
+
+  <!-- SAVINGS GOAL -->
+  <section class="sec">
+    <div class="sec-h"><h2>Savings goal</h2></div>
+    <div class="rent" id="goalCard"></div>
   </section>
 
   <!-- BREAKDOWN -->
@@ -290,9 +302,23 @@
   function migrate(d) {
     if (d.fx == null) d.fx = 17.04;
     if (!d.months) d.months = {};
+    if (d.goal == null) d.goal = 20000;
     if (!d.rentSplit || (d.rentSplit.mode !== 'half' && d.rentSplit.mode !== 'custom')) {
       d.rentSplit = { mode: 'half', share1: (+d.rent || 0) / 2 };
     }
+    // savings used to be one overwritable number per person per month; carry
+    // each of those over as a single deposit so nothing already logged is lost
+    Object.keys(d.months).forEach(function (k) {
+      var m = d.months[k];
+      if (!m.dep) m.dep = [];
+      if (m.saved) {
+        ['1', '2'].forEach(function (w) {
+          var a = +m.saved[w] || 0;
+          if (a > 0) m.dep.push({ id: uid(), who: w, amount: a, day: 1 });
+        });
+        delete m.saved;
+      }
+    });
     return d;
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
@@ -302,12 +328,13 @@
       budget: 5000,
       rent: 1200,
       rentSplit: { mode: 'half', share1: 600 },
+      goal: 20000,
       fixed: [
         { id: uid(), name: 'DEWA (electricity & water)', amount: 350, cat: 'rent', who: 'share' },
         { id: uid(), name: 'Internet (du)', amount: 309, cat: 'rent', who: 'share' },
         { id: uid(), name: 'Mobile plans', amount: 200, cat: 'rent', who: 'share' }
       ],
-      months: {}   // 'YYYY-MM' -> { exp:[...], rentPaid:{1:false,2:false}, saved:{1:0,2:0} }
+      months: {}   // 'YYYY-MM' -> { exp:[...], dep:[...], rentPaid:{1:false,2:false} }
     };
   }
 
@@ -322,11 +349,11 @@
   function isoDate(day) { var d = expDate(day); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function M() {
     var k = key(view);
-    if (!data.months[k]) data.months[k] = { exp: [], rentPaid: { '1': false, '2': false }, saved: { '1': 0, '2': 0 } };
+    if (!data.months[k]) data.months[k] = { exp: [], dep: [], rentPaid: { '1': false, '2': false } };
     var m = data.months[k];
     if (!m.exp) m.exp = [];
+    if (!m.dep) m.dep = [];
     if (!m.rentPaid) m.rentPaid = { '1': false, '2': false };
-    if (!m.saved) m.saved = { '1': 0, '2': 0 };
     return m;
   }
 
@@ -345,6 +372,9 @@
   }
   function fixedTotal() { return data.fixed.reduce(function (s, x) { return s + (+x.amount || 0); }, 0); }
   function expTotal() { return M().exp.reduce(function (s, x) { return s + (+x.amount || 0); }, 0); }
+  function depTotal(m) { return (m.dep || []).reduce(function (s, x) { return s + (+x.amount || 0); }, 0); }
+  // savings accumulate, so the figure that matters spans every month on record
+  function savedAllTime() { return Object.keys(data.months).reduce(function (s, k) { return s + depTotal(data.months[k]); }, 0); }
   // "spent" from JC's side = his rent half + his share of other fixed + his expenses share
   function total() { return (+data.rent || 0) + fixedTotal() + expTotal(); }
 
@@ -419,15 +449,27 @@
                  : '<b>' + WHO['1'].n + '</b> owes <b>' + WHO['2'].n + '</b> <b>' + aed(-owe) + '</b> <span class="php">' + toPhp(-owe) + '</span>')) +
       '<br><span style="color:var(--dim);font-size:12.5px">Rent is tracked separately above.</span></div>';
 
-    /* savings */
-    var sTotal = (+m.saved['1'] || 0) + (+m.saved['2'] || 0);
+    /* savings logged this month, newest first */
+    var sTotal = depTotal(m);
     $('saveSum').innerHTML = aed(sTotal) + '<span class="php">' + toPhp(sTotal) + '</span>';
-    $('saveCard').innerHTML = ['1', '2'].map(function (w) {
-      return '<div class="halfrow"><span class="nm"><i style="background:' + WHO[w].c + '"></i>' + WHO[w].n + ' saved</span>' +
-        '<span class="share num">' + aed(m.saved[w] || 0) + '</span>' +
-        '<button class="pay" data-save="' + w + '">Set amount</button></div>';
-    }).join('') + '<div class="rstatus" style="color:var(--muted)">' +
-      (sTotal > 0 ? 'That\u2019s ' + toPhp(sTotal).replace('\u2248 ', '') + ' set aside together.' : 'Set what each of you saved this month.') + '</div>';
+    var deps = m.dep.slice().sort(function (a, b2) { return (b2.day || 0) - (a.day || 0); });
+    $('depList').innerHTML = deps.length ? deps.map(depRowHTML).join('')
+      : '<div class="empty">Nothing set aside this month yet.<br>Tap “Add to savings” below.</div>';
+
+    /* the goal counts every month together */
+    var allTime = savedAllTime(), goal = +data.goal || 0;
+    var gpc = goal > 0 ? Math.min(100, (allTime / goal) * 100) : 0;
+    var togo = goal - allTime, reached = goal > 0 && togo <= 0;
+    $('goalCard').innerHTML =
+      '<div class="rtop"><h3>Total saved</h3><span class="big static num">' + aed(allTime) + '</span>' +
+        '<button class="edit" data-editgoal="1">Edit goal</button></div>' +
+      '<p class="rsub">' + (goal > 0 ? 'of ' + aed(goal) + ' · ' + Math.round(gpc) + '% · ' + toPhp(allTime)
+                                     : toPhp(allTime) + ' across every month') + '</p>' +
+      (goal > 0 ? '<div class="barline"><i style="width:' + gpc + '%"></i></div>' : '') +
+      '<div class="rstatus ' + (reached ? 'done' : 'muted') + '">' +
+        (goal <= 0 ? 'No goal set — tap “Edit goal” to add one.'
+          : (reached ? '✓ Goal reached' + (togo < 0 ? ' · ' + aed(-togo) + ' over' : '')
+                     : aed(togo) + ' to go · ' + toPhp(togo))) + '</div>';
 
     /* breakdown */
     var byCat = {}; byCat['rent'] = (+data.rent || 0);
@@ -452,6 +494,17 @@
       '<span class="amt num">' + aed(x.amount) + '<span class="php">' + toPhp(x.amount) + '</span></span>' +
       '<button class="del" data-del="' + kind + '" data-id="' + x.id + '" aria-label="Delete">&times;</button></div>';
   }
+  // a deposit has no name or category, so it gets its own row shape:
+  // who, when, how much - which also fills .row's four grid columns exactly
+  function depRowHTML(x) {
+    var w = WHO[x.who] || WHO.share;
+    return '<div class="row editable" data-edit="dep" data-id="' + x.id + '">' +
+      '<span class="ic">💰</span>' +
+      '<div class="body"><div class="name" style="color:' + w.c + '">' + w.n + '</div>' +
+        '<div class="meta">' + (x.day ? dayLabel(x.day) : monthName(view)) + '</div></div>' +
+      '<span class="amt num">' + aed(x.amount) + '<span class="php">' + toPhp(x.amount) + '</span></span>' +
+      '<button class="del" data-del="dep" data-id="' + x.id + '" aria-label="Delete">&times;</button></div>';
+  }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
   $('prevM').addEventListener('click', function () { view.setMonth(view.getMonth() - 1); render(); });
@@ -460,19 +513,14 @@
   document.addEventListener('click', function (e) {
     var rent = e.target.closest('[data-rent]');
     if (rent) { var w = rent.dataset.rent; M().rentPaid[w] = !M().rentPaid[w]; render(); return; }
-    var sv = e.target.closest('[data-save]');
-    if (sv) {
-      var w2 = sv.dataset.save;
-      var v = prompt(WHO[w2].n + ' saved this month (AED):', M().saved[w2] || 0);
-      if (v !== null && !isNaN(+v) && +v >= 0) { M().saved[w2] = +v; render(); }
-      return;
-    }
     var d = e.target.closest('[data-del]');
     if (d) { e.stopPropagation(); var kind = d.dataset.del, id = d.dataset.id;
       if (kind === 'fixed') data.fixed = data.fixed.filter(function (x) { return x.id !== id; });
+      else if (kind === 'dep') M().dep = M().dep.filter(function (x) { return x.id !== id; });
       else M().exp = M().exp.filter(function (x) { return x.id !== id; });
       render(); return; }
     if (e.target.closest('[data-editrent]') || e.target.id === 'rentBig') { openSheet('rent', null); return; }
+    if (e.target.closest('[data-editgoal]')) { openSheet('goal', null); return; }
     var ed = e.target.closest('[data-edit]');
     if (ed) openSheet(ed.dataset.edit, ed.dataset.id);
   });
@@ -483,18 +531,37 @@
     if (kind === 'rent') {
       draft = { rent: +data.rent || 0, mode: (data.rentSplit || {}).mode === 'custom' ? 'custom' : 'half', share1: rentShares()['1'] };
     }
-    else if (id) { var list = kind === 'fixed' ? data.fixed : M().exp; var f = list.filter(function (x) { return x.id === id; })[0];
+    else if (kind === 'goal') { draft = { goal: +data.goal || 0 }; }
+    else if (id) { var list = kind === 'fixed' ? data.fixed : (kind === 'dep' ? M().dep : M().exp); var f = list.filter(function (x) { return x.id === id; })[0];
       draft = f ? JSON.parse(JSON.stringify(f)) : blank(kind); }
     else draft = blank(kind);
     paintSheet();
     $('scrim').classList.add('up'); $('sheet').classList.add('up'); document.body.style.overflow = 'hidden';
-    setTimeout(function () { var el = $('fRent') || $('fName'); if (el) el.focus(); }, 60);
+    setTimeout(function () { var el = $('fRent') || $('fGoal') || $('fName') || $('fAmt'); if (el) el.focus(); }, 60);
   }
-  function blank(kind) { return { id: null, name: '', amount: '', cat: kind === 'fixed' ? 'rent' : 'food', who: 'share', day: kind === 'exp' ? (key(new Date()) === key(view) ? new Date().getDate() : 1) : null }; }
+  function blank(kind) {
+    var today = new Date(), day = key(today) === key(view) ? today.getDate() : 1;
+    if (kind === 'dep') return { id: null, who: '1', amount: '', day: day };
+    return { id: null, name: '', amount: '', cat: kind === 'fixed' ? 'rent' : 'food', who: 'share', day: kind === 'exp' ? day : null };
+  }
   function closeSheet() { $('scrim').classList.remove('up'); $('sheet').classList.remove('up'); document.body.style.overflow = ''; draft = null; if (lastFocus && lastFocus.focus) lastFocus.focus(); }
+
+  function dayFieldHTML() {
+    return '<div class="field"><label>Date</label><input type="date" id="fDay" value="' + isoDate(draft.day) +
+      '" min="' + isoDate(1) + '" max="' + isoDate(daysIn(view)) + '" /><p class="hint">Any day in ' + monthName(view) + '.</p></div>';
+  }
+  function bindDay() {
+    var el = $('fDay'); if (!el) return;
+    el.addEventListener('input', function () {
+      var p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(this.value);
+      draft.day = p ? Math.max(1, Math.min(daysIn(view), +p[3])) : null;
+    });
+  }
 
   function paintSheet() {
     if (editKind === 'rent') { paintRentSheet(); return; }
+    if (editKind === 'goal') { paintGoalSheet(); return; }
+    if (editKind === 'dep') { paintDepSheet(); return; }
     var isFixed = editKind === 'fixed';
     var title = draft.id ? 'Edit' : (isFixed ? 'Add a fixed bill' : 'Add an expense');
     var catBtns = CATS.map(function (c) { return '<button type="button" data-cat="' + c.id + '" aria-pressed="' + (draft.cat === c.id) + '">' + c.icon + ' ' + c.n + '</button>'; }).join('');
@@ -505,14 +572,11 @@
       '<div class="field"><label>How much (AED)?</label><div class="money"><span>AED</span><input type="number" inputmode="decimal" id="fAmt" value="' + (draft.amount || '') + '" placeholder="0" min="0" step="0.01" /></div><p class="hint" id="fPhp"></p></div>' +
       '<div class="field"><label>Category</label><div class="chips-pick" id="fCat">' + catBtns + '</div></div>' +
       '<div class="field"><label>Who paid?</label><div class="chips-pick who-pick" id="fWho">' + whoBtns + '</div></div>' +
-      (isFixed ? '' : '<div class="field"><label>Date</label><input type="date" id="fDay" value="' + isoDate(draft.day) + '" min="' + isoDate(1) + '" max="' + isoDate(daysIn(view)) + '" /><p class="hint">Any day in ' + monthName(view) + '.</p></div>') +
+      (isFixed ? '' : dayFieldHTML()) +
       '<div class="sheet-acts"><button type="button" class="cancel" id="fCancel">Cancel</button><button type="button" class="save" id="fSave">' + (draft.id ? 'Save changes' : 'Add') + '</button></div>';
     $('fName').addEventListener('input', function () { draft.name = this.value; syncSave(); });
     $('fAmt').addEventListener('input', function () { draft.amount = this.value; syncSave(); phpHint(); });
-    if ($('fDay')) $('fDay').addEventListener('input', function () {
-      var p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(this.value);
-      draft.day = p ? Math.max(1, Math.min(daysIn(view), +p[3])) : null;
-    });
+    bindDay();
     $('fCat').addEventListener('click', function (e) { var b = e.target.closest('[data-cat]'); if (!b) return; draft.cat = b.dataset.cat; this.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
     $('fWho').addEventListener('click', function (e) { var b = e.target.closest('[data-w]'); if (!b) return; draft.who = b.dataset.w; this.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
     $('fCancel').addEventListener('click', closeSheet);
@@ -557,11 +621,11 @@
     $('fSave').addEventListener('click', commitRent);
     rentHints();
   }
-  function rentNum(v) { var s = String(v == null ? '' : v).trim(); return s === '' || isNaN(+s) ? null : +s; }
+  function numOrNull(v) { var s = String(v == null ? '' : v).trim(); return s === '' || isNaN(+s) ? null : +s; }
   function rentHints() {
-    var r = rentNum(draft.rent);
+    var r = numOrNull(draft.rent);
     $('fRentPhp').textContent = r > 0 ? '\u2248 \u20B1' + Math.round(r * (+data.fx || 0)).toLocaleString('en-PH') : '';
-    var s1 = draft.mode === 'custom' ? (rentNum(draft.share1) || 0) : (r || 0) / 2;
+    var s1 = draft.mode === 'custom' ? (numOrNull(draft.share1) || 0) : (r || 0) / 2;
     var bad = r != null && (s1 < 0 || s1 > r);
     var h = $('fShareHint');
     h.textContent = bad ? WHO['1'].n + '\u2019s share has to be between 0 and ' + aed(r) + '.'
@@ -570,13 +634,65 @@
     $('fSave').disabled = r == null || r < 0 || bad;
   }
   function commitRent() {
-    var r = rentNum(draft.rent);
+    var r = numOrNull(draft.rent);
     if (r == null || r < 0) return;
-    var s1 = draft.mode === 'custom' ? (rentNum(draft.share1) || 0) : r / 2;
+    var s1 = draft.mode === 'custom' ? (numOrNull(draft.share1) || 0) : r / 2;
     if (s1 < 0 || s1 > r) return;
     data.rent = r;
     data.rentSplit = { mode: draft.mode === 'custom' ? 'custom' : 'half', share1: s1 };
     closeSheet(); render();
+  }
+
+  /* ---- savings: one deposit at a time, plus the goal they add up to ---- */
+  function paintDepSheet() {
+    var whoBtns = ['1', '2'].map(function (w) { return '<button type="button" data-w="' + w + '" aria-pressed="' + (draft.who === w) + '">' + WHO[w].n + '</button>'; }).join('');
+    $('sheetIn').innerHTML =
+      '<h3>' + (draft.id ? 'Edit savings' : 'Add to savings') + '</h3>' +
+      '<div class="field"><label>How much (AED)?</label><div class="money"><span>AED</span><input type="number" inputmode="decimal" id="fAmt" value="' + (draft.amount || '') + '" placeholder="0" min="0" step="0.01" /></div><p class="hint" id="fPhp"></p></div>' +
+      '<div class="field"><label>Who set it aside?</label><div class="chips-pick who-pick" id="fWho">' + whoBtns + '</div></div>' +
+      dayFieldHTML() +
+      '<div class="sheet-acts"><button type="button" class="cancel" id="fCancel">Cancel</button><button type="button" class="save" id="fSave">' + (draft.id ? 'Save changes' : 'Add') + '</button></div>';
+    $('fAmt').addEventListener('input', function () { draft.amount = this.value; depSync(); phpHint(); });
+    $('fWho').addEventListener('click', function (e) { var b = e.target.closest('[data-w]'); if (!b) return; draft.who = b.dataset.w; this.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
+    bindDay();
+    $('fCancel').addEventListener('click', closeSheet);
+    $('fSave').addEventListener('click', commitDep);
+    depSync(); phpHint();
+  }
+  function depSync() { $('fSave').disabled = !(+draft.amount > 0); }
+  function commitDep() {
+    if (!(+draft.amount > 0)) return;
+    draft.amount = +draft.amount;
+    var list = M().dep;
+    if (draft.id) M().dep = list.map(function (x) { return x.id === draft.id ? draft : x; });
+    else { draft.id = uid(); list.push(draft); }
+    closeSheet(); render();
+  }
+
+  function paintGoalSheet() {
+    $('sheetIn').innerHTML =
+      '<h3>Savings goal</h3>' +
+      '<div class="field"><label>What are you saving towards (AED)?</label>' +
+        '<div class="money"><span>AED</span><input type="number" inputmode="decimal" id="fGoal" value="' + (draft.goal || '') + '" min="0" step="0.01" placeholder="0" /></div>' +
+        '<p class="hint" id="fGoalPhp"></p></div>' +
+      '<p class="hint">Measured against everything you’ve saved, every month combined. Set it to 0 to hide the goal.</p>' +
+      '<div class="sheet-acts"><button type="button" class="cancel" id="fCancel">Cancel</button><button type="button" class="save" id="fSave">Save</button></div>';
+    $('fGoal').addEventListener('input', function () { draft.goal = this.value; goalHints(); });
+    $('fCancel').addEventListener('click', closeSheet);
+    $('fSave').addEventListener('click', commitGoal);
+    goalHints();
+  }
+  function goalHints() {
+    var g = numOrNull(draft.goal), saved = savedAllTime();
+    $('fGoalPhp').textContent = g > 0
+      ? toPhp(g) + ' · ' + aed(saved) + ' saved so far (' + Math.round(Math.min(100, (saved / g) * 100)) + '%)'
+      : '';
+    $('fSave').disabled = g == null || g < 0;
+  }
+  function commitGoal() {
+    var g = numOrNull(draft.goal);
+    if (g == null || g < 0) return;
+    data.goal = g; closeSheet(); render();
   }
 
   function phpHint() { var el = $('fPhp'); if (el) el.textContent = +draft.amount > 0 ? '\u2248 \u20B1' + Math.round(+draft.amount * (+data.fx || 0)).toLocaleString('en-PH') : ''; }
@@ -591,6 +707,7 @@
 
   $('addExp').addEventListener('click', function () { openSheet('exp', null); });
   $('addFixed').addEventListener('click', function () { openSheet('fixed', null); });
+  $('addDep').addEventListener('click', function () { openSheet('dep', null); });
   $('scrim').addEventListener('click', closeSheet);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && draft) closeSheet(); });
 
